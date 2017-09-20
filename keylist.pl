@@ -17,7 +17,17 @@ use Data::Dumper;
 my $isserver = 0;
 my $date = time();
 my $datestring = strftime("%Y-%m-%d %H:%M",localtime($date));
+my $daterfc = strftime("%Y-%m-%dT%H:%M:00Z",localtime($date));
+my @atom;my @table;
 
+my $entr = '<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom">';
+   $entr .= '<title>OSM Latest Keys</title>';
+   $entr .= '<id>http://osm.mueschelsoft.de/taginfo</id>';
+	 $entr .= '<link href="http://osm.mueschelsoft.de/taginfo/newkeys.htm" rel="self" />';
+	 $entr .= '<updated>'.$daterfc.'</updated>';
+
+push(@atom,$entr);
+	 
 print "Content-Type: text/html; charset=utf-8\r\n\r\n" if $isserver;
 print <<"HDOC";
 <!DOCTYPE html>
@@ -60,19 +70,24 @@ if($d->{'lastchange'} < $date - 30000) {
       }
     $d->{k}{$k->{'key'}}{lastseen} = $date;
     }
-
+  $d->{'oldlastchange'} = $d->{'lastchange'};
   $d->{'lastchange'} = $date;  
   store($d,"data/storage.pstore");  
   }
 
-my @list;  
+my @list; my $vanished = 0; 
 
 foreach my $k (keys %{$d->{k}}) {
   if($d->{k}{$k}{firstseen} >= $date - 50000){
     push(@list,$k);
     }
+  if ($d->{k}{$k}{lastseen} == $d->{'oldlastchange'}||0) {
+    $vanished++;
+    }
   }
 
+print "<br>New keys found today: ".scalar(@list);
+print "<br>Keys vanished today: ".$vanished;
 
 #Print table, sorted by date of appearance and alphabetic  
 print "<table><th>Key<th>Count<th>FirstSeen<th>LastSeen<th>Editor\n";  
@@ -98,21 +113,55 @@ foreach my $k (sort { $d->{k}{$b}{firstseen} cmp $d->{k}{$a}{firstseen} || lc($a
     $jurl = "http://overpass-api.de/api/xapi_meta?*[$jurl*]";
     $jurl = "http://localhost:8111/import?url=".$jurl;
 
-    print("<tr><td>") if $lastseen eq "";
-    print("<tr class=\"removed\"><td>") unless $lastseen eq "";
+    $entr = "";
+    $entr .= "<tr><td>" if $lastseen eq "";
+    $entr .= "<tr class=\"removed\"><td>" unless $lastseen eq "";
    
-    print("<a href=\"http://taginfo.openstreetmap.org/keys/$k\">") if $lastseen eq "";
-    print("$k");
-    print("</a>") if $lastseen eq "";  
-    print("<td>$num<td>$seen<td>$lastseen<td>");
-    print("<a href=\"$lurl\">(L)</a>") if $lastseen eq "";
-    print("<a href=\"http://taginfo.openstreetmap.org/keys/$k\">&nbsp;(T)</a>") if $lastseen eq "";
-    print("<a href=\"$jurl\" target=\"hI\">&nbsp;(J)</a>") if $lastseen eq "";
-    print("<a href=\"$ourl\">&nbsp;(O)</a>") if $lastseen eq "";
 
-    print("\n");
+    $entr .= "<a href=\"http://taginfo.openstreetmap.org/keys/$k\">" if $lastseen eq "";
+    $entr .= "$k";
+    $entr .= "</a>" if $lastseen eq "";  
+    $entr .= "<td>$num<td>$seen<td>$lastseen<td>";
+    $entr .= "<a href=\"$lurl\">(L)</a>" if $lastseen eq "";
+    $entr .= "<a href=\"http://taginfo.openstreetmap.org/keys/$k\">&nbsp;(T)</a>" if $lastseen eq "";
+    $entr .= "<a href=\"$jurl\" target=\"hI\">&nbsp;(J)</a>" if $lastseen eq "";
+    $entr .= "<a href=\"$ourl\">&nbsp;(O)</a>" if $lastseen eq "";
+    
+    push(@table,$entr);
+
+    if($lastseen eq ""  && $d->{k}{$k}{firstseen} >= ($d->{'lastchange'} - 400000) && $num != 0) {
+      $entr = "<entry>";
+      $entr .= "<title>$k</title>\n";
+      $entr .= "<id>http://taginfo.openstreetmap.org/keys/".uri_encode($k)."</id>\n";
+      $entr .= "<updated>".$daterfc."</updated>\n";
+      $entr .= "<summary>$k - $num</summary>\n";
+      $entr .= "<author><name>OSM</name></author>";
+      $entr .= "<content type=\"xhtml\"><div xmlns=\"http://www.w3.org/1999/xhtml\">";
+      $entr .= "<p>Occurences:$num<br/>";
+      $entr .= "First seen on: $seen<br/>";
+      $entr .= "Links: ";
+      $entr .= "<a href=\"$lurl\">(Level0)</a>";
+      $entr .= "<a href=\"http://taginfo.openstreetmap.org/keys/".uri_encode($k)."\">(Taginfo)</a>";
+      $entr .= "<a href=\"$jurl\" target=\"hI\">(JOSM)</a>";
+      $entr .= "<a href=\"$ourl\">(OverpassTurbo)</a>";
+      $entr .= "</p></div></content></entry>";
+      
+      push(@atom,$entr);
+      }
     }
   }
+  
+  
+print join "\n", @table;
+  
 print "</table>";
 print '<iframe style="display: none" id="hI" name="hI"></iframe>';
 print "</body></html>\n";
+
+
+push(@atom,"</feed>");
+
+open my $fh, '>', 'newkeys.atom';
+print $fh join "\n", @atom;
+close $fh;
+
